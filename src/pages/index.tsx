@@ -1,135 +1,143 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Head from 'next/head';
-import InteractiveMap from '../components/InteractiveMap';
-import UtilityOperationsPanel from '../components/UtilityOperationsPanel';
-import WaymoMobilityPanel from '../components/WaymoMobilityPanel';
+import dynamic from 'next/dynamic';
 import { DEMO_INCIDENTS, DEMO_HAZARDS, DEMO_CREWS } from '../data/demoData';
 import { detectCrossBorderSynergies } from '../lib/spatial';
-import { GridIncident } from '../types';
-import { Bot, Shield, Activity } from 'lucide-react';
+import UtilityOperationsPanel from '../components/UtilityOperationsPanel';
+import WaymoMobilityPanel from '../components/WaymoMobilityPanel';
+import RegulatoryBriefModal from '../components/RegulatoryBriefModal';
+
+// Dynamically import InteractiveMap with SSR disabled to prevent Leaflet window errors
+const DynamicMap = dynamic(() => import('../components/InteractiveMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-400 gap-2">
+      <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      <span className="text-xs font-mono">Initializing GIS Engine & Spatial Layers...</span>
+    </div>
+  ),
+});
 
 export default function Home() {
-  const [selectedIncident, setSelectedIncident] = useState<GridIncident | null>(null);
-  const [aiReport, setAiReport] = useState<string | null>(null);
-  const [loadingAi, setLoadingAi] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<any | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDetourActive, setIsDetourActive] = useState(false);
 
-  const synergies = detectCrossBorderSynergies(DEMO_INCIDENTS);
+  // Compute spatial synergy clusters dynamically based on current grid incidents
+  const synergies = useMemo(() => {
+    return detectCrossBorderSynergies(DEMO_INCIDENTS);
+  }, []);
 
-  const handlePlayVoice = async (text: string) => {
-    try {
-      const res = await fetch('/api/voice-alert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-
-      if (res.headers.get('Content-Type')?.includes('audio/mpeg')) {
-        const blob = await res.blob();
-        const audio = new Audio(URL.createObjectURL(blob));
-        audio.play();
-      } else {
-        // Instant Browser Web Speech API fallback if no external API key is set
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.rate = 1.0;
-          window.speechSynthesis.speak(utterance);
-        }
-      }
-    } catch (e) {
-      console.error('Audio playback error:', e);
-    }
-  };
-
-  const handleGenerateAiBriefing = async () => {
-    setLoadingAi(true);
-    try {
-      const res = await fetch('/api/ai-assist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: 'Generate emergency FERC 1920 joint compliance briefing for the Savannah Basin corridor.' })
-      });
-      const data = await res.json();
-      setAiReport(data.briefing);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingAi(false);
-    }
-  };
+  // Calculate cumulative regional cost savings across all flagged utility corridors
+  const totalProjectedSavings = useMemo(() => {
+    return synergies.reduce((acc, curr) => acc + (curr.savingsProjectionUsd || 0), 0);
+  }, [synergies]);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 font-sans overflow-hidden">
+    <>
       <Head>
-        <title>Storm Intelligence | Sperry & Waymo Coordination</title>
+        <title>Storm Intelligence | FERC 1920 & Waymo Telematics</title>
+        <meta
+          name="description"
+          content="Geospatial coordination bridge for regional transmission grids and autonomous mobility fleets."
+        />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      {/* Header */}
-      <header className="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-emerald-500/20 border border-emerald-500 flex items-center justify-center text-emerald-400 font-bold">
-            <Activity className="w-4 h-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white tracking-wide">STORM INTELLIGENCE</h1>
-            <p className="text-[10px] text-slate-400">Sperry Tech & Waymo Mobility Geospatial Bridge</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleGenerateAiBriefing}
-            disabled={loadingAi}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded font-medium transition disabled:opacity-50"
-          >
-            <Bot className="w-4 h-4" />
-            {loadingAi ? 'Synthesizing...' : 'Generate FERC 1920 AI Filing'}
-          </button>
-        </div>
-      </header>
-
-      {/* Main 3-Column Cockpit Layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Column: Sperry GridLock Engine */}
-        <div className="w-80 md:w-96 h-full flex-shrink-0">
-          <UtilityOperationsPanel
-            synergies={synergies}
-            onPlayAlert={handlePlayVoice}
-            onSelectIncident={setSelectedIncident}
-          />
-        </div>
-
-        {/* Center: Live Interactive Map */}
-        <div className="flex-1 h-full relative">
-          <InteractiveMap
-            incidents={DEMO_INCIDENTS}
-            hazards={DEMO_HAZARDS}
-            crews={DEMO_CREWS}
-            synergies={synergies}
-            selectedIncident={selectedIncident}
-            onSelectIncident={setSelectedIncident}
-          />
-
-          {/* AI Regulatory Report Modal */}
-          {aiReport && (
-            <div className="absolute top-4 right-4 z-20 w-96 max-h-[85%] bg-slate-900/95 border border-emerald-500 p-4 rounded-xl shadow-2xl backdrop-blur overflow-y-auto text-slate-200 text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-700">
-                <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                  <Shield className="w-4 h-4" /> FERC Order 1920 Regulatory Briefing
-                </span>
-                <button onClick={() => setAiReport(null)} className="text-slate-400 hover:text-white font-bold">✕</button>
-              </div>
-              <pre className="mt-3 whitespace-pre-wrap font-sans leading-relaxed text-slate-300 text-xs">
-                {aiReport}
-              </pre>
+      <main className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+        {/* Top Header Bar */}
+        <header className="h-16 border-b border-slate-800 bg-slate-900/90 px-6 flex items-center justify-between z-20 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
             </div>
-          )}
+            <div>
+              <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
+                STORM INTELLIGENCE
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 uppercase tracking-widest font-mono">
+                  FERC 1920 Active
+                </span>
+              </h1>
+              <p className="text-xs text-slate-400">
+                Sperry GridLock Engine & Autonomous Mobility Bridge
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex flex-col items-end">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                Est. Intertie Synergy
+              </span>
+              <span className="text-sm font-bold text-emerald-400 font-mono">
+                ${totalProjectedSavings.toLocaleString()} USD
+              </span>
+            </div>
+
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all shadow-lg shadow-emerald-900/20 active:scale-95"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              Generate FERC 1920 AI Filing
+            </button>
+          </div>
+        </header>
+
+        {/* 3-Column Operational Layout */}
+        <div className="flex-1 grid grid-cols-12 overflow-hidden">
+          {/* Left Panel: Sperry GridLock Cross-Utility Engine */}
+          <section className="col-span-12 lg:col-span-3 border-r border-slate-800 bg-slate-900/50 p-4 overflow-y-auto">
+            <UtilityOperationsPanel
+              incidents={DEMO_INCIDENTS}
+              synergies={synergies}
+              selectedIncident={selectedIncident}
+              onSelectIncident={(incident) => setSelectedIncident(incident)}
+            />
+          </section>
+
+          {/* Center Panel: Full Leaflet Geospatial View */}
+          <section className="col-span-12 lg:col-span-6 h-full relative">
+            <DynamicMap
+              incidents={DEMO_INCIDENTS}
+              hazards={DEMO_HAZARDS}
+              crews={DEMO_CREWS}
+              synergies={synergies}
+              selectedIncident={selectedIncident}
+              onSelectIncident={(incident) => setSelectedIncident(incident)}
+              isDetourActive={isDetourActive}
+            />
+          </section>
+
+          {/* Right Panel: Waymo Mobility Telematics & Dispatch Simulator */}
+          <section className="col-span-12 lg:col-span-3 border-l border-slate-800 bg-slate-900/50 p-4 overflow-y-auto">
+            <WaymoMobilityPanel
+              hazards={DEMO_HAZARDS}
+              onTriggerSimulation={(detourStatus: boolean) => setIsDetourActive(detourStatus)}
+            />
+          </section>
         </div>
 
-        {/* Right Column: Waymo Mobility Panel */}
-        <div className="w-72 md:w-80 h-full flex-shrink-0">
-          <WaymoMobilityPanel hazards={DEMO_HAZARDS} />
-        </div>
-      </div>
-    </div>
+        {/* Modal: Live FERC Order No. 1920 Compliance Document */}
+        {isModalOpen && (
+          <RegulatoryBriefModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            synergies={synergies}
+            totalSavings={totalProjectedSavings}
+          />
+        )}
+      </main>
+    </>
   );
 }

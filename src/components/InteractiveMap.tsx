@@ -4,14 +4,13 @@ interface Props {
   incidents: any[];
   hazards: any[];
   synergies: any[];
-  crews?: any[];
-  selectedIncident?: any;
-  onSelectIncident?: (incident: any) => void;
+  isDetourActive?: boolean;
 }
 
-export default function InteractiveMap({ incidents, hazards, synergies }: Props) {
+export default function InteractiveMap({ incidents, hazards, synergies, isDetourActive }: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const routeLayersRef = useRef<{ primary?: any; detour?: any }>({});
   const [ready, setReady] = useState(false);
   const [showStormCone, setShowStormCone] = useState(true);
 
@@ -56,7 +55,7 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
       mapInstanceRef.current = null;
     }
 
-    const map = L.map(mapContainerRef.current).setView([31.8, -81.4], 8);
+    const map = L.map(mapContainerRef.current).setView([32.28, -81.12], 10);
     mapInstanceRef.current = map;
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -72,7 +71,7 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
         iconAnchor: [7, 7]
       });
 
-    // 1. Hurricane Category-3 Vector Projection Cone
+    // 1. Hurricane Wind Cone Overlay
     if (showStormCone) {
       const stormCoordinates: [number, number][] = [
         [29.8, -80.5],
@@ -90,10 +89,10 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
         fillOpacity: 0.12,
         weight: 1.5,
         dashArray: '4, 4'
-      }).addTo(map).bindPopup('<b>NOAA Cat-3 Hurricane Trajectory Cone</b><br>Sustained Winds: 115 MPH<br>Surge Risk: High');
+      }).addTo(map);
     }
 
-    // 2. Sperry Synergy Lines and Coverage Radii
+    // 2. Sperry Synergies
     synergies.forEach((syn) => {
       L.polyline(
         [
@@ -110,9 +109,9 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
       }).addTo(map);
     });
 
-    // 3. Multi-Utility Grid Incidents
+    // 3. Grid Incidents
     incidents.forEach((inc) => {
-      let color = '#3b82f6'; // Default Dominion
+      let color = '#3b82f6';
       const util = inc.utility.toLowerCase();
       if (util.includes('georgia')) color = '#ef4444';
       else if (util.includes('duke')) color = '#a855f7';
@@ -124,29 +123,61 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
           <div style="color: #0f172a; font-size: 12px; font-family: sans-serif;">
             <b style="text-transform: uppercase; font-size: 10px; color: #64748b;">${inc.utility}</b><br/>
             <strong style="font-size: 13px;">${inc.title}</strong><br/>
-            Operating Voltage: <b>${inc.voltageKv} kV</b><br/>
-            Customers Affected: <b>${inc.customersOut?.toLocaleString() || 'N/A'}</b><br/>
-            Timeline: <b>${inc.startDate || 'N/A'} to ${inc.endDate || 'N/A'}</b>
+            Voltage: <b>${inc.voltageKv} kV</b>
           </div>
         `);
     });
 
-    // 4. Waymo Autonomous Telematics Hazards
+    // 4. Waymo Hazards
     hazards.forEach((haz) => {
       L.marker([haz.location.lat, haz.location.lng], { icon: makePin('#f59e0b') })
         .addTo(map)
         .bindPopup(`
           <div style="color: #0f172a; font-size: 12px; font-family: sans-serif;">
-            <b style="color: #d97706; text-transform: uppercase; font-size: 10px;">Waymo Mobility Hazard</b><br/>
+            <b style="color: #d97706; text-transform: uppercase; font-size: 10px;">Waymo Road Hazard</b><br/>
             <strong style="font-size: 13px;">${haz.corridor}</strong><br/>
-            <span style="color: ${haz.impassableForEV ? '#dc2626' : '#d97706'}; font-weight: bold;">
-              ${haz.impassableForEV ? '⛔ Impassable for AV Fleet' : '⚠️ Proceed Under Caution'}
-            </span><br/>
-            Water Depth: <b>${haz.waterDepthInches || 0} in</b> | Detour Drain: <b>+${haz.batteryImpactKw || 0} kWh</b><br/>
             Detour: <b>${haz.recommendedReroute}</b>
           </div>
         `);
     });
+
+    // 5. Waymo Autonomous Route Simulation Polylines
+    const primaryRoute: [number, number][] = [
+      [32.0835, -81.0998], // Savannah Port
+      [32.18, -81.14],
+      [32.338, -81.155],  // Encounter Hazard
+      [32.35, -81.23]     // Rincon
+    ];
+
+    const detourRoute: [number, number][] = [
+      [32.0835, -81.0998], // Savannah Port
+      [32.12, -81.19],
+      [32.22, -81.24],    // Old Augusta Rd Bypass
+      [32.35, -81.23]     // Rincon
+    ];
+
+    if (!isDetourActive) {
+      // Primary Route in Bright Cyan
+      routeLayersRef.current.primary = L.polyline(primaryRoute, {
+        color: '#06b6d4',
+        weight: 5,
+        opacity: 0.85
+      }).addTo(map).bindPopup('<b>Waymo Mission 104</b><br>Primary Route via GA-21');
+    } else {
+      // Impassable Primary in Red + Active Detour in Emerald Green
+      routeLayersRef.current.primary = L.polyline(primaryRoute, {
+        color: '#ef4444',
+        weight: 4,
+        dashArray: '5, 10',
+        opacity: 0.6
+      }).addTo(map);
+
+      routeLayersRef.current.detour = L.polyline(detourRoute, {
+        color: '#10b981',
+        weight: 6,
+        opacity: 0.95
+      }).addTo(map).bindPopup('<b>Waymo Autonomous Detour</b><br>Bypassing GA-21 via Old Augusta Rd').openPopup();
+    }
 
     return () => {
       if (mapInstanceRef.current) {
@@ -154,7 +185,7 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
         mapInstanceRef.current = null;
       }
     };
-  }, [ready, incidents, hazards, synergies, showStormCone]);
+  }, [ready, incidents, hazards, synergies, showStormCone, isDetourActive]);
 
   return (
     <div className="w-full h-full relative">
@@ -188,10 +219,10 @@ export default function InteractiveMap({ incidents, hazards, synergies }: Props)
           </div>
         </div>
         <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span> Waymo Road Hazard
+          <span className="w-4 h-1 bg-cyan-400 inline-block rounded"></span> Nominal AV Route
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-0.5 border-t-2 border-dashed border-emerald-400 inline-block"></span> Sperry Synergy Corridor
+          <span className="w-4 h-1 bg-emerald-500 inline-block rounded"></span> Autonomous Detour
         </div>
       </div>
     </div>

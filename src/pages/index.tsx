@@ -114,7 +114,7 @@ export default function Home() {
               crews={DEMO_CREWS}
               synergies={synergies}
               selectedIncident={selectedIncident}
-              onSelectIncident={(incident) => setSelectedIncident(incident)}
+              onSelectIncident={(incident: any) => setSelectedIncident(incident)}
               isDetourActive={isDetourActive}
             />
           </section>

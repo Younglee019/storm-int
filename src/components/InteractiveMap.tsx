@@ -1,9 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 
 interface Props {
-  incidents: any[];
-  hazards: any[];
-  synergies: any[];
+  incidents?: any[];
+  hazards?: any[];
+  synergies?: any[];
+  crews?: any[];
+  selectedIncident?: any;
+  onSelectIncident?: (incident: any) => void;
   isDetourActive?: boolean;
 }
 

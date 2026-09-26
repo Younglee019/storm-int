@@ -4,12 +4,27 @@ import { GridIncident } from '../types';
 import { Zap, DollarSign, Radio, ArrowRight } from 'lucide-react';
 
 interface Props {
-  synergies: OverlapSynergy[];
-  onPlayAlert: (text: string) => void;
-  onSelectIncident: (inc: GridIncident) => void;
+  incidents?: any[];
+  synergies?: any[];
+  selectedIncident?: any;
+  onSelectIncident?: (incident: any) => void;
+  onPlayAlert?: (message?: any) => void;
 }
 
-export default function UtilityOperationsPanel({ synergies, onPlayAlert, onSelectIncident }: Props) {
+export default function UtilityOperationsPanel({
+  incidents = [],
+  synergies = [],
+  selectedIncident = null,
+  onSelectIncident,
+  onPlayAlert = (message?: any) => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const text = typeof message === 'string' 
+        ? message 
+        : 'Dispatch alert: high-voltage transmission overlap detected.';
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+  }
+}: Props) {
   return (
     <div className="flex flex-col h-full bg-slate-900 text-slate-100 p-4 overflow-y-auto border-r border-slate-800">
       <div className="pb-3 border-b border-slate-800">

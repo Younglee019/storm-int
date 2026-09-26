@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: #020617;
+}
+
+.custom-map-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

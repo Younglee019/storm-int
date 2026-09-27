@@ -143,8 +143,7 @@ export default function WaymoMobilityPanel({ hazards = [], onTriggerSimulation }
                 <span className="text-white">{incident.corridor}</span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
                   {incident.type}
-                </span> grkg rjgr krjgkr rojj rkejk hjehg   
-                rjhk rj kepk ur leu k
+                </span> 
 
               </div>
               <p className="text-slate-300 text-[11px] font-medium">{incident.title}</p>

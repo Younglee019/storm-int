@@ -12,22 +12,23 @@ export default function WaymoMobilityPanel({ hazards = [], onTriggerSimulation }
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    async function fetchLiveFeed() {
-      try {
-        setIsLoading(true);
-        const res = await fetch('/api/live-incidents');
-        if (res.ok) {
-          const data = await res.json();
-          setLiveIncidents(data.incidents || []);
-        }
-      } catch (err) {
-        console.error('Failed to load real incident feed:', err);
-      } finally {
-        setIsLoading(false);
+  async function fetchRealData() {
+    try {
+      setIsLoading(true);
+      // Fetch authentic NOAA data directly
+      const weatherRes = await fetch('/api/live-weather');
+      if (weatherRes.ok) {
+        const weatherData = await weatherRes.json();
+        setLiveIncidents(weatherData.alerts || []);
       }
+    } catch (err) {
+      console.error('Error fetching live data:', err);
+    } finally {
+      setIsLoading(false);
     }
-    fetchLiveFeed();
-  }, []);
+  }
+  fetchRealData();
+}, []);
 
   const toggleSimulation = () => {
     const nextState = !detourActive;
@@ -142,7 +143,9 @@ export default function WaymoMobilityPanel({ hazards = [], onTriggerSimulation }
                 <span className="text-white">{incident.corridor}</span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
                   {incident.type}
-                </span>
+                </span> grkg rjgr krjgkr rojj rkejk hjehg   
+                rjhk rj kepk ur leu k
+
               </div>
               <p className="text-slate-300 text-[11px] font-medium">{incident.title}</p>
               <div className="text-[10px] text-slate-400 flex justify-between pt-1 border-t border-slate-800/80">

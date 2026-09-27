@@ -79,7 +79,7 @@ REGULATORY REPOSITORY: Homeland Infrastructure Foundation-Level Data (HIFLD) Reg
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+<div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-3xl flex flex-col max-h-[90vh] shadow-2xl">
         {/* Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">

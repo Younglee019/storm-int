@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
+import L from 'leaflet';
 
 interface Props {
   incidents?: any[];
@@ -10,222 +11,273 @@ interface Props {
   isDetourActive?: boolean;
 }
 
-export default function InteractiveMap({ incidents, hazards, synergies, isDetourActive }: Props) {
+export default function InteractiveMap({
+  incidents = [],
+  hazards = [],
+  synergies = [],
+  crews = [],
+  selectedIncident = null,
+  onSelectIncident,
+  isDetourActive = false
+}: Props) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const routeLayersRef = useRef<{ primary?: any; detour?: any }>({});
-  const [ready, setReady] = useState(false);
-  const [showStormCone, setShowStormCone] = useState(true);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const animatedVehicleMarkerRef = useRef<L.Marker | null>(null);
+  const animationIntervalRef = useRef<any>(null);
 
+  // Initialize Map
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    const loadLeaflet = async () => {
-      if (!(window as any).L) {
-        if (!document.getElementById('leaflet-css')) {
-          const link = document.createElement('link');
-          link.id = 'leaflet-css';
-          link.rel = 'stylesheet';
-          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-          document.head.appendChild(link);
-        }
+    // Centered to frame Plant McIntosh (GA), Jasper County (SC), and Savannah cleanly
+    const map = L.map(mapContainerRef.current, {
+      center: [32.24, -81.08],
+      zoom: 10,
+      zoomControl: false
+    });
 
-        await new Promise((resolve) => {
-          if (document.getElementById('leaflet-js')) {
-            resolve(true);
-            return;
-          }
-          const script = document.createElement('script');
-          script.id = 'leaflet-js';
-          script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-          script.onload = () => resolve(true);
-          document.body.appendChild(script);
-        });
-      }
-      setReady(true);
-    };
+    L.control.zoom({ position: 'topleft' }).addTo(map);
 
-    loadLeaflet();
-  }, []);
-
-  useEffect(() => {
-    if (!ready || !mapContainerRef.current) return;
-    const L = (window as any).L;
-    if (!L) return;
-
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
-
-    const map = L.map(mapContainerRef.current).setView([32.28, -81.12], 10);
-    mapInstanceRef.current = map;
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+    // Dark-mode cartography tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
       maxZoom: 19
     }).addTo(map);
 
-    const makePin = (color: string) =>
-      L.divIcon({
-        className: 'custom-map-marker',
-        html: `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px ${color};"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
+    const layerGroup = L.layerGroup().addTo(map);
+    mapInstanceRef.current = map;
+    layerGroupRef.current = layerGroup;
+
+    return () => {
+      if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Update Layers & Simulations
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const layers = layerGroupRef.current;
+    if (!map || !layers) return;
+
+    layers.clearLayers();
+    if (animationIntervalRef.current) clearInterval(animationIntervalRef.current);
+
+    // Utility Color Palette
+    const getUtilityColor = (utility: string) => {
+      switch (utility) {
+        case 'Dominion Energy SC':
+          return '#3b82f6'; // Blue
+        case 'Georgia Power':
+          return '#ef4444'; // Red
+        case 'Duke Energy':
+          return '#a855f7'; // Purple
+        case 'Florida Power & Light (FPL)':
+          return '#06b6d4'; // Cyan
+        default:
+          return '#10b981';
+      }
+    };
+
+    // 1. Draw Substation Nodes (DHS HIFLD)
+    incidents.forEach((inc) => {
+      const isSelected = selectedIncident?.id === inc.id;
+      const color = getUtilityColor(inc.utility);
+
+      const marker = L.circleMarker([inc.location.lat, inc.location.lng], {
+        radius: isSelected ? 11 : 7,
+        fillColor: color,
+        color: '#ffffff',
+        weight: isSelected ? 3 : 1.5,
+        opacity: 1,
+        fillOpacity: 0.9
       });
 
-    // 1. Hurricane Wind Cone Overlay
-    if (showStormCone) {
-      const stormCoordinates: [number, number][] = [
-        [29.8, -80.5],
-        [31.2, -81.1],
-        [32.6, -81.3],
-        [34.1, -81.8],
-        [33.9, -82.6],
-        [31.8, -82.2],
-        [29.9, -81.3]
-      ];
+      marker.bindPopup(`
+        <div style="font-family: sans-serif; font-size: 11px;">
+          <b style="color: ${color};">${inc.utility}</b><br/>
+          <b>${inc.title}</b><br/>
+          <span>Voltage: ${inc.voltageKv || 115} kV</span><br/>
+          <span>Status: ${inc.status}</span><br/>
+          <small style="color: #64748b;">Source: ${inc.dataSource || 'DHS HIFLD'}</small>
+        </div>
+      `);
 
-      L.polygon(stormCoordinates, {
-        color: '#dc2626',
-        fillColor: '#ef4444',
-        fillOpacity: 0.12,
-        weight: 1.5,
-        dashArray: '4, 4'
-      }).addTo(map);
-    }
+      marker.on('click', () => {
+        if (onSelectIncident) onSelectIncident(inc);
+      });
 
-    // 2. Sperry Synergies
+      layers.addLayer(marker);
+    });
+
+    // 2. Draw FERC 1920 Synergy Buffer Radii (< 40km laydown zones)
     synergies.forEach((syn) => {
-      L.polyline(
-        [
-          [syn.incidentA.location.lat, syn.incidentA.location.lng],
-          [syn.incidentB.location.lat, syn.incidentB.location.lng]
-        ],
-        { color: '#10b981', weight: 2.5, dashArray: '6, 6' }
-      ).addTo(map);
+      const posA: [number, number] = [syn.incidentA.location.lat, syn.incidentA.location.lng];
+      const posB: [number, number] = [syn.incidentB.location.lat, syn.incidentB.location.lng];
 
-      L.circle([syn.incidentA.location.lat, syn.incidentA.location.lng], {
-        radius: syn.distanceKm * 500,
+      // Laydown zone circle (Tier 3 = 8km visual ring for local staging)
+      const bufferCircle = L.circle(posA, {
+        radius: 8000,
         color: '#10b981',
-        fillOpacity: 0.05
-      }).addTo(map);
+        weight: 1.5,
+        dashArray: '4, 4',
+        fillColor: '#10b981',
+        fillOpacity: 0.08
+      });
+      layers.addLayer(bufferCircle);
+
+      // Synergy connector line
+      const line = L.polyline([posA, posB], {
+        color: '#10b981',
+        weight: 2,
+        dashArray: '6, 6',
+        opacity: 0.85
+      });
+      layers.addLayer(line);
     });
 
-    // 3. Grid Incidents
-    incidents.forEach((inc) => {
-      let color = '#3b82f6';
-      const util = inc.utility.toLowerCase();
-      if (util.includes('georgia')) color = '#ef4444';
-      else if (util.includes('duke')) color = '#a855f7';
-      else if (util.includes('florida') || util.includes('fpl')) color = '#06b6d4';
-
-      L.marker([inc.location.lat, inc.location.lng], { icon: makePin(color) })
-        .addTo(map)
-        .bindPopup(`
-          <div style="color: #0f172a; font-size: 12px; font-family: sans-serif;">
-            <b style="text-transform: uppercase; font-size: 10px; color: #64748b;">${inc.utility}</b><br/>
-            <strong style="font-size: 13px;">${inc.title}</strong><br/>
-            Voltage: <b>${inc.voltageKv} kV</b>
-          </div>
-        `);
-    });
-
-    // 4. Waymo Hazards
-    hazards.forEach((haz) => {
-      L.marker([haz.location.lat, haz.location.lng], { icon: makePin('#f59e0b') })
-        .addTo(map)
-        .bindPopup(`
-          <div style="color: #0f172a; font-size: 12px; font-family: sans-serif;">
-            <b style="color: #d97706; text-transform: uppercase; font-size: 10px;">Waymo Road Hazard</b><br/>
-            <strong style="font-size: 13px;">${haz.corridor}</strong><br/>
-            Detour: <b>${haz.recommendedReroute}</b>
-          </div>
-        `);
-    });
-
-    // 5. Waymo Autonomous Route Simulation Polylines
-    const primaryRoute: [number, number][] = [
-      [32.0835, -81.0998], // Savannah Port
-      [32.18, -81.14],
-      [32.338, -81.155],  // Encounter Hazard
-      [32.35, -81.23]     // Rincon
+    // 3. Waymo Autonomous Telematics Route Corridors
+    // Nominal route: GA-21 south through Port Wentworth into Savannah
+    const nominalWaymoRoute: [number, number][] = [
+      [32.355, -81.185],
+      [32.338, -81.155], // Hazard location (downed pole / flood)
+      [32.228, -81.15],
+      [32.148, -81.144],
+      [32.083, -81.099]
     ];
 
-    const detourRoute: [number, number][] = [
-      [32.0835, -81.0998], // Savannah Port
-      [32.12, -81.19],
-      [32.22, -81.24],    // Old Augusta Rd Bypass
-      [32.35, -81.23]     // Rincon
+    // Detour bypass coordinates: Cut west to Old Augusta Rd via Rincon
+    const detourWaymoRoute: [number, number][] = [
+      [32.355, -81.185],
+      [32.345, -81.235], // Old Augusta Rd Detour bypass
+      [32.221, -81.238],
+      [32.14, -81.16],
+      [32.083, -81.099]
     ];
 
     if (!isDetourActive) {
-      // Primary Route in Bright Cyan
-      routeLayersRef.current.primary = L.polyline(primaryRoute, {
+      // Nominal Path (Cyan)
+      const routeLine = L.polyline(nominalWaymoRoute, {
         color: '#06b6d4',
-        weight: 5,
-        opacity: 0.85
-      }).addTo(map).bindPopup('<b>Waymo Mission 104</b><br>Primary Route via GA-21');
-    } else {
-      // Impassable Primary in Red + Active Detour in Emerald Green
-      routeLayersRef.current.primary = L.polyline(primaryRoute, {
-        color: '#ef4444',
         weight: 4,
-        dashArray: '5, 10',
-        opacity: 0.6
-      }).addTo(map);
+        opacity: 0.85
+      });
+      layers.addLayer(routeLine);
+    } else {
+      // Detour Mode: Blocked Red Zone on GA-21
+      const blockedLine = L.polyline(
+        [
+          [32.355, -81.185],
+          [32.338, -81.155],
+          [32.228, -81.15]
+        ],
+        {
+          color: '#ef4444',
+          weight: 4,
+          dashArray: '6, 6',
+          opacity: 0.95
+        }
+      );
+      layers.addLayer(blockedLine);
 
-      routeLayersRef.current.detour = L.polyline(detourRoute, {
+      // Active Detour Path (Green)
+      const detourLine = L.polyline(detourWaymoRoute, {
         color: '#10b981',
-        weight: 6,
+        weight: 4,
         opacity: 0.95
-      }).addTo(map).bindPopup('<b>Waymo Autonomous Detour</b><br>Bypassing GA-21 via Old Augusta Rd').openPopup();
-    }
+      });
+      layers.addLayer(detourLine);
 
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, [ready, incidents, hazards, synergies, showStormCone, isDetourActive]);
+      // Obstacle marker at hazard coordinates
+      const hazardIcon = L.divIcon({
+        className: 'hazard-icon-pulse',
+        html: `<div style="background-color: #ef4444; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px #ef4444; animation: pulse 1s infinite;"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      const hazardMarker = L.marker([32.338, -81.155], { icon: hazardIcon });
+      hazardMarker.bindPopup('<b>HAZ-201: Impassable</b><br/>18" standing water on GA-21.');
+      layers.addLayer(hazardMarker);
+
+      // 4. Moving Autonomous Vehicle Simulation
+      const carIcon = L.divIcon({
+        className: 'av-vehicle-marker',
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+            <span style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background-color: #06b6d4; opacity: 0.6; animation: ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+            <div style="background-color: #0891b2; color: white; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; box-shadow: 0 0 8px #06b6d4;">
+              W
+            </div>
+          </div>
+        `,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+
+      let step = 0;
+      const totalSteps = 40;
+      const startPt = detourWaymoRoute[0];
+      const midPt = detourWaymoRoute[1];
+      const endPt = detourWaymoRoute[2];
+
+      const vehicleMarker = L.marker(startPt, { icon: carIcon }).addTo(layers);
+      animatedVehicleMarkerRef.current = vehicleMarker;
+
+      animationIntervalRef.current = setInterval(() => {
+        step = (step + 1) % (totalSteps + 1);
+        const t = step / totalSteps;
+
+        // Quadratic interpolation along detour segment
+        const lat =
+          (1 - t) * (1 - t) * startPt[0] + 2 * (1 - t) * t * midPt[0] + t * t * endPt[0];
+        const lng =
+          (1 - t) * (1 - t) * startPt[1] + 2 * (1 - t) * t * midPt[1] + t * t * endPt[1];
+
+        vehicleMarker.setLatLng([lat, lng]);
+      }, 150);
+    }
+  }, [incidents, hazards, synergies, crews, selectedIncident, isDetourActive]);
 
   return (
-    <div className="w-full h-full relative">
-      <div ref={mapContainerRef} className="w-full h-full z-0 bg-slate-950" />
+    <div className="relative w-full h-full bg-slate-950">
+      <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* Floating Control & GIS Legend */}
-      <div className="absolute bottom-4 left-4 z-10 bg-slate-900/95 border border-slate-700 p-3 rounded-lg backdrop-blur text-xs text-slate-300 space-y-1.5 shadow-2xl">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-800 pb-1.5 mb-1.5">
-          <span className="font-bold text-white tracking-wide">Regional Intertie GIS</span>
-          <button
-            onClick={() => setShowStormCone(!showStormCone)}
-            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-              showStormCone ? 'bg-red-500/20 text-red-400 border border-red-500/40' : 'bg-slate-800 text-slate-400'
-            }`}
-          >
-            {showStormCone ? '🌪️ Storm Cone: ON' : '🌪️ Storm Cone: OFF'}
-          </button>
+      {/* Floating Tactical GIS Legend */}
+      <div className="absolute bottom-3 left-3 z-[500] bg-slate-950/90 backdrop-blur border border-slate-800 p-2.5 rounded-lg text-[10px] space-y-1.5 shadow-xl max-w-[210px]">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+          <span className="font-bold text-slate-200">Regional Intertie GIS</span>
+          <span className="text-[9px] text-emerald-400 font-mono font-semibold">HIFLD Validated</span>
         </div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        <div className="grid grid-cols-2 gap-1 text-slate-300">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span> Dominion SC
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            <span>Dominion SC</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Georgia Power
+            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+            <span>Georgia Power</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span> Duke Energy
+            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+            <span>Duke Energy</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 inline-block"></span> FPL
+            <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span>FPL Florida</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
-          <span className="w-4 h-1 bg-cyan-400 inline-block rounded"></span> Nominal AV Route
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="w-4 h-1 bg-emerald-500 inline-block rounded"></span> Autonomous Detour
+        <div className="border-t border-slate-800 pt-1 space-y-1">
+          <div className="flex items-center gap-1.5 text-slate-300">
+            <span className="w-3.5 h-1 bg-cyan-400 rounded"></span>
+            <span>Nominal AV Route</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-slate-300">
+            <span className="w-3.5 h-1 bg-emerald-400 rounded"></span>
+            <span>Autonomous Detour</span>
+          </div>
         </div>
       </div>
     </div>
